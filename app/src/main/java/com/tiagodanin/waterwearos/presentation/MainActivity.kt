@@ -12,8 +12,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Devices.WEAR_OS_LARGE_ROUND
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.wear.tooling.preview.devices.WearDevices
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material.*
 import com.tiagodanin.waterwearos.R
@@ -95,6 +95,7 @@ fun InfoWater() {
     }
 }
 
+@Preview(device = WearDevices.LARGE_ROUND)
 @Composable
 fun DefaultPreview() {
     WearApp()
