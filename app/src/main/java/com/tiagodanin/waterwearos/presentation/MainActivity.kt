@@ -49,14 +49,14 @@ fun WearApp() {
 
 @Composable
 fun ProgressIndicatorWater() {
-    val recomedByDay = 3.0f
-    val progressOfDay: Float = count.value / recomedByDay
+    val dailyTarget = 2.0f  // liters
+    val progressOfDay: Float = count.value / dailyTarget
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
             startAngle = 295f,
             endAngle = 245f,
-            progress = progressOfDay, // Valor do progresso
+            progress = progressOfDay,
             strokeWidth = 5.dp,
             modifier = Modifier
                 .fillMaxSize()
@@ -79,15 +79,15 @@ fun InfoWater() {
                 .padding(horizontal = 30.dp),
             textAlign = TextAlign.Center,
             color = MaterialTheme.colors.primary,
-            text = "Você já bebeu ${count.value} litro de água hoje"
+            text = "Today it was \n${"%.1f".format(count.value)} liters"
         )
         Button(
             modifier = Modifier.padding(top = 5.dp),
-            onClick = { count.value += 0.5f },
+            onClick = { count.value += 0.2f },
         ) {
             Icon(
                 painter = painterResource(id = R.drawable.cup_water),
-                contentDescription = "airplane",
+                contentDescription = "cup_water",
                 modifier = Modifier
                     .size(ButtonDefaults.DefaultButtonSize)
                     .wrapContentSize(align = Alignment.Center),
@@ -97,7 +97,7 @@ fun InfoWater() {
 }
 
 
-@Preview(device = Devices.WEAR_OS_SMALL_ROUND, showSystemUi = true)
+@Preview(device = Devices.WEAR_OS_LARGE_ROUND, showSystemUi = true)
 @Composable
 fun DefaultPreview() {
     WearApp()
