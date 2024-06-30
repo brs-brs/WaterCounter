@@ -7,12 +7,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Devices
+import androidx.compose.ui.tooling.preview.Devices.WEAR_OS_LARGE_ROUND
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material.*
@@ -28,9 +28,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val count: MutableState<Float> = mutableStateOf(0f)
+private val count: MutableState<Float> = mutableFloatStateOf(0f)
 
-@OptIn(ExperimentalWearMaterialApi::class)
 @Composable
 fun WearApp() {
     WaterWearOSTheme {
@@ -96,8 +95,6 @@ fun InfoWater() {
     }
 }
 
-
-@Preview(device = Devices.WEAR_OS_LARGE_ROUND, showSystemUi = true)
 @Composable
 fun DefaultPreview() {
     WearApp()
