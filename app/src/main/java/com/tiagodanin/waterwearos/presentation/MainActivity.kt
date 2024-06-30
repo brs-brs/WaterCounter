@@ -32,13 +32,11 @@ import com.tiagodanin.waterwearos.presentation.theme.WaterWearOSTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Retrieve the SharedPreferences instance using the name "WearAppPrefs"
         val sharedPreferences = getSharedPreferences("WaterCounterPrefs", Context.MODE_PRIVATE)
-        // Load the saved count and last button press time from SharedPreferences
-        val savedCount = sharedPreferences.getFloat("count", 0f)
+        val savedTodayDrinkedLiters = sharedPreferences.getFloat("todayDrinkedLiters", 0f)
         val savedLastPressTime = sharedPreferences.getLong("lastPressTime", 0L)
         // Set the loaded values to the MutableState variables
-        count.value = savedCount
+        todayDrinkedLiters.value = savedTodayDrinkedLiters
         lastButtonPressTime.value = if (savedLastPressTime == 0L) null else savedLastPressTime
         setContent {
             WearApp(sharedPreferences)
@@ -46,7 +44,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val count: MutableState<Float> = mutableFloatStateOf(0f)
+private val todayDrinkedLiters: MutableState<Float> = mutableFloatStateOf(0f)
 private val lastButtonPressTime: MutableState<Long?> = mutableStateOf(null)
 
 @Composable
@@ -69,7 +67,7 @@ fun WearApp(sharedPreferences: SharedPreferences) {
 @Composable
 fun ProgressIndicatorWater(sharedPreferences: SharedPreferences) {
     val dailyTarget = 2.0f  // liters
-    val progressOfDay: Float = count.value / dailyTarget
+    val progressOfDay: Float = todayDrinkedLiters.value / dailyTarget
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
@@ -108,6 +106,14 @@ fun InfoWater(sharedPreferences: SharedPreferences) {
     var timeSinceLastPress by remember { mutableStateOf("") }
     var lastButtonPressTime by remember { mutableStateOf<Long?>(null) }
 
+    fun updateTimeSinceLastPress() {
+        timeSinceLastPress = lastButtonPressTime?.let {
+            val currentTime = System.currentTimeMillis()
+            val elapsedMillis = currentTime - it
+            formatElapsedTime(elapsedMillis)
+        } ?: "a while"
+    }
+
     // Retrieve last button press time and count from shared preferences
     LaunchedEffect(Unit) {
         lastButtonPressTime = sharedPreferences.getLong("lastPressTime", 0L).takeIf { it != 0L }
@@ -116,12 +122,7 @@ fun InfoWater(sharedPreferences: SharedPreferences) {
     // Launching a coroutine to update the time difference every second
     LaunchedEffect(Unit) {
         while (true) {
-            lastButtonPressTime?.let {
-                val currentTime = System.currentTimeMillis()
-                val elapsedMillis = currentTime - it
-
-                timeSinceLastPress = formatElapsedTime(elapsedMillis)
-            }
+            updateTimeSinceLastPress()
             delay(1000L)
         }
     }
@@ -137,31 +138,57 @@ fun InfoWater(sharedPreferences: SharedPreferences) {
                 .padding(horizontal = 30.dp),
             textAlign = TextAlign.Center,
             color = MaterialTheme.colors.primary,
-            text = "Today it was \n${"%.1f".format(count.value)} liters"
+            text = "Today it was \n${"%.1f".format(todayDrinkedLiters.value)} liters"
         )
-        Button(
-            modifier = Modifier.padding(top = 5.dp),
-            onClick = {
-                count.value += 0.2f
-                val currentMillis = System.currentTimeMillis()
-                lastButtonPressTime = currentMillis
-                with(sharedPreferences.edit()) {
-                    putFloat("count", count.value)
-                    putLong("lastPressTime", currentMillis)
-                    apply()
-                }
-            },
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.cup_water),
-                contentDescription = "cup_water",
-                modifier = Modifier
-                    .size(ButtonDefaults.DefaultButtonSize)
-                    .wrapContentSize(align = Alignment.Center),
-            )
+        Row {
+            // Drink button
+            Button(
+                modifier = Modifier.padding(top = 10.dp),
+                onClick = {
+                    todayDrinkedLiters.value += 0.2f
+                    val currentMillis = System.currentTimeMillis()
+                    lastButtonPressTime = currentMillis
+                    with(sharedPreferences.edit()) {
+                        putFloat("todayDrinkedLiters", todayDrinkedLiters.value)
+                        putLong("lastPressTime", currentMillis)
+                        apply()
+                    }
+                    updateTimeSinceLastPress()
+                },
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.cup_water),
+                    contentDescription = "cup_water",
+                    modifier = Modifier
+                        .size(ButtonDefaults.DefaultButtonSize)
+                        .wrapContentSize(align = Alignment.Center),
+                )
+            }
+
+            // Clear button
+            Button(
+                modifier = Modifier.padding(top = 10.dp),
+                onClick = {
+                    todayDrinkedLiters.value = 0f
+                    lastButtonPressTime = null
+                    with(sharedPreferences.edit()) {
+                        putFloat("todayDrinkedLiters", 0f)
+                        putLong("lastPressTime", 0L)
+                        apply()
+                    }
+                },
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_clear),
+                    contentDescription = "clear",
+                    modifier = Modifier
+                        .size(ButtonDefaults.SmallButtonSize)
+                        .wrapContentSize(align = Alignment.Center),
+                )
+            }
         }
         Text(
-            text = "Last drink:\n$timeSinceLastPress ago",
+            text = "Since last drink:\n$timeSinceLastPress",
             modifier = Modifier.padding(top = 10.dp),
             color = MaterialTheme.colors.primary,
             textAlign = TextAlign.Center
