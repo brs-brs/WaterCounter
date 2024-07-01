@@ -1,11 +1,11 @@
 package com.tiagodanin.waterwearos.presentation
+
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -13,14 +13,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.material.Scaffold
 import kotlinx.coroutines.delay
+import androidx.work.*
 import java.util.concurrent.TimeUnit
 import android.content.SharedPreferences
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.MutableState
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import android.util.Log
+import androidx.compose.runtime.*
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.tooling.preview.PreviewParameterProvider
@@ -28,24 +25,112 @@ import androidx.wear.tooling.preview.devices.WearDevices
 import androidx.wear.compose.material.*
 import com.tiagodanin.waterwearos.R
 import com.tiagodanin.waterwearos.presentation.theme.WaterWearOSTheme
+import java.util.Calendar
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContext
+import com.tiagodanin.waterwearos.DrinkButtonReceiver
+
+private const val DrinkGlassSize = 0.2F // liters
+private const val DrinkReminderInterval = 30L // minutes
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        checkAndRequestNotificationPermission()
+        scheduleDailyDrinkReset()
+        scheduleDrinkNotifications()
+
         val sharedPreferences = getSharedPreferences("WaterCounterPrefs", Context.MODE_PRIVATE)
-        val savedTodayDrinkedLiters = sharedPreferences.getFloat("todayDrinkedLiters", 0f)
-        val savedLastPressTime = sharedPreferences.getLong("lastPressTime", 0L)
-        // Set the loaded values to the MutableState variables
-        todayDrinkedLiters.value = savedTodayDrinkedLiters
-        lastButtonPressTime.value = if (savedLastPressTime == 0L) null else savedLastPressTime
+
         setContent {
             WearApp(sharedPreferences)
         }
     }
-}
 
-private val todayDrinkedLiters: MutableState<Float> = mutableFloatStateOf(0f)
-private val lastButtonPressTime: MutableState<Long?> = mutableStateOf(null)
+    private fun checkAndRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                Log.d("brs", "Permission is NOT granted!!!")
+                openSettings()
+            } else {
+                Log.d("brs", "Permission already granted")
+            }
+        } else {
+            Log.d("brs", "For devices below Android 13 no need for permission")
+        }
+    }
+
+    private fun openSettings() {
+        val intent = Intent().apply {
+            action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+            data = Uri.fromParts("package", packageName, null)
+        }
+        startActivity(intent)
+    }
+
+    private fun scheduleDailyDrinkReset() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+            .setRequiresBatteryNotLow(false)
+            .build()
+
+        val workRequest = PeriodicWorkRequestBuilder<ResetWaterCounterWorker>(1, TimeUnit.DAYS)
+            .setInitialDelay(calculateInitialDelay(), TimeUnit.MILLISECONDS)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "ResetWaterCounterWork",
+            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
+            workRequest
+        )
+    }
+
+    private fun scheduleDrinkNotifications() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+            .setRequiresBatteryNotLow(false)
+            .build()
+
+        val workRequest1 = PeriodicWorkRequestBuilder<DrinkNotificationWorker>(DrinkReminderInterval, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "DrinkNotificationWork",
+            ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE,
+            workRequest1
+        )
+    }
+
+    private fun calculateInitialDelay(): Long {
+        val currentTimeMillis = System.currentTimeMillis()
+        val calendar = Calendar.getInstance().apply {
+            timeInMillis = currentTimeMillis
+            // target time
+            set(Calendar.HOUR_OF_DAY, 2)
+            set(Calendar.MINUTE, 5)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        // If the calculated time is before now, add one day to the initial delay
+        if (calendar.timeInMillis <= currentTimeMillis) {
+            calendar.add(Calendar.DAY_OF_MONTH, 1)
+        }
+        val delay = calendar.timeInMillis - currentTimeMillis
+        Log.d("brs", "Initial delay for drink reset: $delay ms")
+        return delay
+    }
+}
 
 @Composable
 fun WearApp(sharedPreferences: SharedPreferences) {
@@ -63,11 +148,22 @@ fun WearApp(sharedPreferences: SharedPreferences) {
     }
 }
 
-
 @Composable
 fun ProgressIndicatorWater(sharedPreferences: SharedPreferences) {
     val dailyTarget = 2.0f  // liters
-    val progressOfDay: Float = todayDrinkedLiters.value / dailyTarget
+
+    var todayDrinkedLiters by remember { mutableStateOf(sharedPreferences.getFloat("todayDrinkedLiters", 0f)) }
+    var stringButtonLastPressed by remember { mutableStateOf("") }
+
+    LaunchedEffect(sharedPreferences) {
+        while (true) {
+            todayDrinkedLiters = sharedPreferences.getFloat("todayDrinkedLiters", 0f)
+            stringButtonLastPressed = updateStringButtonLastPressed(sharedPreferences)
+            delay(1000L)
+        }
+    }
+
+    val progressOfDay: Float = todayDrinkedLiters / dailyTarget
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
@@ -79,7 +175,11 @@ fun ProgressIndicatorWater(sharedPreferences: SharedPreferences) {
                 .fillMaxSize()
                 .padding(all = 10.dp)
         )
-        InfoWater(sharedPreferences)
+        InfoWater(
+            todayDrinkedLiters = todayDrinkedLiters,
+            stringButtonLastPressed = stringButtonLastPressed,
+            sharedPreferences = sharedPreferences
+        )
     }
 }
 
@@ -101,31 +201,22 @@ fun formatElapsedTime(elapsedMillis: Long): String {
     }
 }
 
+fun updateStringButtonLastPressed(sharedPreferences: SharedPreferences): String {
+    val lastButtonPressTime = sharedPreferences.getLong("lastPressTime", 0L).takeIf { it != 0L }
+    return lastButtonPressTime?.let {
+        val currentTime = System.currentTimeMillis()
+        val elapsedMillis = currentTime - it
+        formatElapsedTime(elapsedMillis)
+    } ?: "a while"
+}
+
 @Composable
-fun InfoWater(sharedPreferences: SharedPreferences) {
-    var timeSinceLastPress by remember { mutableStateOf("") }
-    var lastButtonPressTime by remember { mutableStateOf<Long?>(null) }
-
-    fun updateTimeSinceLastPress() {
-        timeSinceLastPress = lastButtonPressTime?.let {
-            val currentTime = System.currentTimeMillis()
-            val elapsedMillis = currentTime - it
-            formatElapsedTime(elapsedMillis)
-        } ?: "a while"
-    }
-
-    // Retrieve last button press time and count from shared preferences
-    LaunchedEffect(Unit) {
-        lastButtonPressTime = sharedPreferences.getLong("lastPressTime", 0L).takeIf { it != 0L }
-    }
-
-    // Launching a coroutine to update the time difference every second
-    LaunchedEffect(Unit) {
-        while (true) {
-            updateTimeSinceLastPress()
-            delay(1000L)
-        }
-    }
+fun InfoWater(
+    todayDrinkedLiters: Float,
+    stringButtonLastPressed: String,
+    sharedPreferences: SharedPreferences
+) {
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -138,22 +229,15 @@ fun InfoWater(sharedPreferences: SharedPreferences) {
                 .padding(horizontal = 30.dp),
             textAlign = TextAlign.Center,
             color = MaterialTheme.colors.primary,
-            text = "Today it was \n${"%.1f".format(todayDrinkedLiters.value)} liters"
+            text = "Today it was \n${"%.1f".format(todayDrinkedLiters)} liters"
         )
         Row {
             // Drink button
             Button(
                 modifier = Modifier.padding(top = 10.dp),
                 onClick = {
-                    todayDrinkedLiters.value += 0.2f
-                    val currentMillis = System.currentTimeMillis()
-                    lastButtonPressTime = currentMillis
-                    with(sharedPreferences.edit()) {
-                        putFloat("todayDrinkedLiters", todayDrinkedLiters.value)
-                        putLong("lastPressTime", currentMillis)
-                        apply()
-                    }
-                    updateTimeSinceLastPress()
+                    val increaseIntent = Intent(context, DrinkButtonReceiver::class.java)
+                    context.sendBroadcast(increaseIntent)
                 },
             ) {
                 Icon(
@@ -169,13 +253,12 @@ fun InfoWater(sharedPreferences: SharedPreferences) {
             Button(
                 modifier = Modifier.padding(top = 10.dp),
                 onClick = {
-                    todayDrinkedLiters.value = 0f
-                    lastButtonPressTime = null
                     with(sharedPreferences.edit()) {
                         putFloat("todayDrinkedLiters", 0f)
                         putLong("lastPressTime", 0L)
                         apply()
                     }
+                    Log.d("brs", "Reset all sharedPreferences manually")
                 },
             ) {
                 Icon(
@@ -188,13 +271,25 @@ fun InfoWater(sharedPreferences: SharedPreferences) {
             }
         }
         Text(
-            text = "Since last drink:\n$timeSinceLastPress",
+            text = "Since last drink:\n$stringButtonLastPressed",
             modifier = Modifier.padding(top = 10.dp),
             color = MaterialTheme.colors.primary,
             textAlign = TextAlign.Center
         )
     }
 }
+
+object WaterCounterManager {
+    fun handleDrinkButtonClicked(sharedPreferences: SharedPreferences) {
+        Log.d("brs", "Drink button: handleDrinkButtonClicked")
+        with(sharedPreferences.edit()) {
+            putFloat("todayDrinkedLiters", sharedPreferences.getFloat("todayDrinkedLiters", 0f) + DrinkGlassSize)
+            putLong("lastPressTime", System.currentTimeMillis())
+            apply()
+        }
+    }
+}
+
 
 @Preview(device = WearDevices.LARGE_ROUND)
 @Composable
